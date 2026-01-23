@@ -1,0 +1,9 @@
+from __future__ import annotations
+from typing import Protocol
+import numpy as np
+
+
+class BasicHNSWIndex(Protocol):
+    def create_index(self, initial_vectors, **options) -> None: ...
+    def insert(self, vec_id: int, vec: np.ndarray) -> None: ...
+    def query(self, q: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]: ...

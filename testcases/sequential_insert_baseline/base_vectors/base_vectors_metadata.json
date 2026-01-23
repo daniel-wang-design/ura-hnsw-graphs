@@ -1,0 +1,11 @@
+{
+  "seed": 42,
+  "dim": 128,
+  "n_base": 50000,
+  "dtype": "float32",
+  "distribution": "standard_normal",
+  "file": "base_vectors.fbin",
+  "formats": {
+    "fbin": "int32 n, int32 dim, n*dim float32 row-major"
+  }
+}

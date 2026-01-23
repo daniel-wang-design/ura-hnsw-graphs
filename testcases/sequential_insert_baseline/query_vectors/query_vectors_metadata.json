@@ -1,0 +1,18 @@
+{
+  "seed": 42,
+  "dim": 128,
+  "n": 10000,
+  "dtype": "float32",
+  "distribution": {
+    "type": "mixture_of_gaussians",
+    "num_anchors": 200,
+    "anchors": "standard_normal",
+    "noise": "Normal(0, 0.05^2) per-dimension"
+  },
+  "files": {
+    "vectors": "query_vectors.fbin"
+  },
+  "formats": {
+    "fbin": "int32 n, int32 dim, then n*dim float32 row-major"
+  }
+}

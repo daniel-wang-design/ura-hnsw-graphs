@@ -1,2 +1,4 @@
 hnswlib
 numpy
+pandas
+matplotlib
