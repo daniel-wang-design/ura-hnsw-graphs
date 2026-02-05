@@ -5,7 +5,7 @@
   "dtype": "float32",
   "distribution": {
     "type": "mixture_of_gaussians",
-    "num_anchors": 200,
+    "num_anchors": 1,
     "anchors": "standard_normal",
     "noise": "Normal(0, 0.05^2) per-dimension"
   },
