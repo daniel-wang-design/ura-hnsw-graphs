@@ -18,9 +18,11 @@ python -m experiments.baseline_experiment.run --base .\testcases\sequential_inse
 ```
 
 This is the result of multiple insert hotspots with temporal locality for each query ie query after insert.
+
 ![alt text](image-1.png)
 
 The graph below is with single hotspot inset and temporal locality query ie query after insert.
+
 ![alt text](image-3.png)
 
 
@@ -34,10 +36,13 @@ ion 90 --probability 90
 ```
 
 The graph below is single hotspot:
+
 ![alt text](image-4.png)
 
 The graph below is for multiple hotspots:
+
 ![alt text](image-5.png)
+
 ### Buffer Experiment
 This experiment adds a basic buffer to the baseline. The index is not changed ever. For each query, simply use the old index to get topk, then replace the furthest vectors with closer vectors from the buffer.
 
@@ -47,15 +52,19 @@ python -m experiments.buffer_experiment.run --base ./testcases/sequential_insert
 ```
 
 The graph below is with multiple insert hotspots and each query has temporal locality ie query after insert.
+
 ![alt text](image.png)
 
 The graph below is with single hotspot inset and temporal locality query ie query after insert. 
+
 ![alt text](image-2.png)
 
 The graphs below are with probabilitistic termporal query insert/query, with probability = 90, and partition = 90.
 
 The graph below is for single hotspot:
+
 ![alt text](image-7.png)
 
 The graph below is for multiple hotspots:
+
 ![alt text](image-6.png)
