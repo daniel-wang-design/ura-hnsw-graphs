@@ -13,8 +13,15 @@ The database vectors are randomly generated. The query vectors are generated wit
 This experiment involved having client A insert new vectors while client B queries top k after each insert. The index is not updated so we expect the accuracy to decrease.
 
 To run
+
+PowerShell:
 ```
 python -m experiments.baseline_experiment.run --base .\testcases\sequential_insert_baseline\base_vectors\base_vectors.fbin --query .\testcases\sequential_insert_baseline\query_vectors\query_vectors.fbin --k 100 --ef 500
+```
+Bash
+```
+python -m experiments.baseline_experiment.run_sequential_creation --base ./testcases/sequential_insert_baseline/base_vec
+tors/base_vectors.fbin --query ./testcases/sequential_insert_baseline/query_vectors/query_vectors.fbin --k 100 --ef 500
 ```
 
 This is the result of multiple insert hotspots with temporal locality for each query ie query after insert.
@@ -68,3 +75,15 @@ The graph below is for single hotspot:
 The graph below is for multiple hotspots:
 
 ![alt text](image-6.png)
+
+### Sequential vs Batch Index Creation
+
+The graph below is for batch index creation
+
+![alt text](image-1.png)
+![alt text](image-3.png)
+
+The graph below is for sequential index creation
+
+![alt text](image-8.png)
+![alt text](image-9.png)
