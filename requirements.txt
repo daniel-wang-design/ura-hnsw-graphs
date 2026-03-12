@@ -1,4 +1,4 @@
-hnswlib
+#hnswlib
 numpy
 pandas
 matplotlib

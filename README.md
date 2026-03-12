@@ -91,3 +91,7 @@ The graph below is for sequential index creation
 Below are the results of running recall with multiple hotspots using the new HNSW
 
 ![alt text](image-10.png)
+
+The graph below is using the C++ implementation:
+
+![alt text](image-11.png)

@@ -1,3 +1,6 @@
 venv/
 __pycache__/
 temp.*
+venv3/
+*.so
+*.log
