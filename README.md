@@ -95,3 +95,18 @@ Below are the results of running recall with multiple hotspots using the new HNS
 The graph below is using the C++ implementation:
 
 ![alt text](image-11.png)
+
+## CPP HNSW Locking Results
+
+Using optimized code:
+```
+HNSW build: 158.783s
+Concurrent phase: 440.352s
+Readers completed: 1000000/1000000
+Writers completed: 1000000/1000000
+Exceptions: 0
+```
+
+Using no-ops to mimic no concurrency control:
+```
+```
