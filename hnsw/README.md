@@ -3,7 +3,7 @@
 g++ -O3 -Wall -shared -std=c++17 -fPIC \
   $(python3-config --includes) \
   -I/usr/include/pybind11 \
-  hnsw_pybind.cpp \
+  hnsw_per_node_locks.cpp \
   -o hnsw_cpp$(python3-config --extension-suffix)
 ```
 
@@ -24,4 +24,9 @@ Install packages from requirements.txt
 Run command:
 ```
 PYTHONPATH=./hnsw:. python -m experiments.baseline_experiment.run_pybind --base ./testcases/sequential_insert_multiple_hotspots/base_vectors/base_vectors.fbin --query ./testcases/sequential_insert_multiple_hotspots/query_vectors/query_vectors.fbin --k 100 --ef 500
+```
+
+Running performance tests:
+```
+PYTHONPATH=./hnsw:. python -m experiments.baseline_experiment.concurrent_performance_test --base ./testcases/sequential_insert_baseline/base_vectors/base_vectors.fbin --query ./testcases/sequential_insert_baseline/query_vectors/query_vectors.fbin --k 100
 ```
