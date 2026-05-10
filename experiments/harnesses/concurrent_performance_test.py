@@ -3,26 +3,27 @@ import threading
 import time
 import traceback
 from pathlib import Path
+from typing import Any
 
 import numpy as np
-import hnsw_cpp
 
 from utility.read_vectors import load_base_and_query
 
 
 def parse_args(folder: Path):
     parser = argparse.ArgumentParser(
-        description="Build the pybind HNSW index, then stress it with concurrent readers and writers."
+        description="Build the index, then stress it with concurrent readers and writers."
     )
 
     parser.add_argument("--base", required=True, type=str, help="Path to base .fbin file")
     parser.add_argument("--query", required=True, type=str, help="Path to query .fbin file")
-    parser.add_argument("--k", required=True, type=int, help="Top-k for knn_search")
+    parser.add_argument("--k", required=True, type=int, help="Top-k for queries")
 
     parser.add_argument("--space", type=str, default="l2", choices=["l2", "ip", "cosine"])
     parser.add_argument("--M", type=int, default=16)
     parser.add_argument("--ef_construction", type=int, default=200)
     parser.add_argument("--ef", type=int, default=50)
+    parser.add_argument("--num_threads", type=int, default=-1)
     parser.add_argument("--random_seed", type=int, default=42)
 
     parser.add_argument("--num_readers", type=int, default=100)
@@ -36,7 +37,10 @@ def parse_args(folder: Path):
     parser.add_argument(
         "--same_query_for_all_readers",
         action="store_true",
-        help="If set, every reader always queries query[insert_query_idx]. Otherwise each reader cycles through query vectors.",
+        help=(
+            "If set, every reader always queries query[insert_query_idx]. "
+            "Otherwise each reader cycles through query vectors."
+        ),
     )
 
     parser.add_argument(
@@ -55,9 +59,6 @@ def parse_args(folder: Path):
     return parser.parse_args()
 
 
-def to_cpp_vector(vec: np.ndarray) -> list[float]:
-    return np.asarray(vec, dtype=np.float64, order="C").tolist()
-
 
 def summarize_latencies(latencies: list[float]) -> tuple[float, float, float]:
     if not latencies:
@@ -66,31 +67,85 @@ def summarize_latencies(latencies: list[float]) -> tuple[float, float, float]:
     return float(arr.mean()), float(np.percentile(arr, 95)), float(arr.max())
 
 
-def build_index(base: np.ndarray, args) -> tuple[hnsw_cpp.HNSW, float]:
-    if args.space != "l2":
-        raise ValueError("This pybind HNSW implementation only supports l2 distance")
 
+def normalize_vec(vec: np.ndarray) -> np.ndarray:
+    return np.asarray(vec, dtype=np.float32, order="C")
+
+
+
+def build_index(database: Any, base: np.ndarray, args, total_future_inserts: int) -> float:
     if base.ndim != 2 or base.shape[0] == 0:
         raise ValueError(f"base must be a non-empty 2D array, got shape={base.shape}")
 
-    index = hnsw_cpp.HNSW()
-
     t0 = time.perf_counter()
-    index.init(
-        dim=int(base.shape[1]),
-        M=int(args.M),
-        ef_construction=int(args.ef_construction),
-        random_seed=int(args.random_seed),
-    )
 
-    for label, vec in enumerate(base):
-        index.insert(int(label), to_cpp_vector(vec))
+    if hasattr(database, "create_index"):
+        database.create_index(
+            base,
+            space=args.space,
+            ef_construction=args.ef_construction,
+            M=args.M,
+            ef=args.ef,
+            num_threads=args.num_threads,
+            max_elements=int(base.shape[0] + total_future_inserts),
+            random_seed=args.random_seed,
+        )
+    elif hasattr(database, "init") and hasattr(database, "insert"):
+        if args.space != "l2":
+            raise ValueError("The init/insert fallback currently only supports l2 distance")
+
+        database.init(
+            dim=int(base.shape[1]),
+            M=int(args.M),
+            ef_construction=int(args.ef_construction),
+            random_seed=int(args.random_seed),
+        )
+        for label, vec in enumerate(base):
+            database.insert(int(label), normalize_vec(vec).astype(np.float64, copy=False).tolist())
+    else:
+        raise TypeError(
+            "database must provide either create_index(...) or init(...)+insert(...) methods"
+        )
 
     t1 = time.perf_counter()
-    return index, (t1 - t0)
+    return t1 - t0
 
 
-def run(folder: Path):
+
+def run_query(database: Any, qv: np.ndarray, k: int, ef: int):
+    if hasattr(database, "query"):
+        result = database.query(normalize_vec(qv), int(k))
+        if isinstance(result, tuple) and len(result) == 2:
+            ids, _ = result
+            return np.asarray(ids).reshape(-1)
+        return np.asarray(result).reshape(-1)
+
+    if hasattr(database, "knn_search"):
+        result = database.knn_search(
+            np.asarray(qv, dtype=np.float64, order="C").tolist(),
+            int(k),
+            int(ef),
+        )
+        return np.asarray([label for label, _dist in result], dtype=np.int64)
+
+    raise TypeError("database must provide query(...) or knn_search(...) for reads")
+
+
+
+def run_insert(database: Any, label: int, vec: np.ndarray):
+    if hasattr(database, "insert"):
+        try:
+            database.insert(int(label), normalize_vec(vec))
+            return
+        except TypeError:
+            database.insert(int(label), np.asarray(vec, dtype=np.float64, order="C").tolist())
+            return
+
+    raise TypeError("database must provide insert(label, vector) for writes")
+
+
+
+def run(folder: Path, database: Any):
     args = parse_args(folder)
 
     out_path = Path(args.output)
@@ -99,8 +154,8 @@ def run(folder: Path):
     csv_path.parent.mkdir(parents=True, exist_ok=True)
 
     base, query = load_base_and_query(args.base, args.query)
-    base = np.asarray(base, dtype=np.float64, order="C")
-    query = np.asarray(query, dtype=np.float64, order="C")
+    base = np.asarray(base, dtype=np.float32, order="C")
+    query = np.asarray(query, dtype=np.float32, order="C")
 
     print("Base vectors:", base.shape, "Query vectors:", query.shape)
 
@@ -112,16 +167,19 @@ def run(folder: Path):
         raise ValueError(f"base dim {base.shape[1]} != query dim {query.shape[1]}")
     if args.k > base.shape[0]:
         raise ValueError(f"k={args.k} cannot exceed initial base size N={base.shape[0]}")
+    if args.num_readers <= 0 or args.num_writers <= 0:
+        raise ValueError("num_readers and num_writers must both be > 0")
     if not (0 <= args.insert_query_idx < query.shape[0]):
         raise ValueError(
             f"insert_query_idx must be in [0, {query.shape[0] - 1}], got {args.insert_query_idx}"
         )
 
-    index, build_secs = build_index(base, args)
-
     N, D = base.shape
     Q = query.shape[0]
-    insert_vec = np.asarray(query[args.insert_query_idx], dtype=np.float64, order="C").copy()
+    total_future_inserts = args.num_writers * Q
+    build_secs = build_index(database, base, args, total_future_inserts=total_future_inserts)
+
+    insert_vec = normalize_vec(query[args.insert_query_idx]).copy()
 
     start_event = threading.Event()
     failure_event = threading.Event()
@@ -168,10 +226,10 @@ def run(folder: Path):
                     qv = query[(reader_id + i) % Q]
 
                 tq0 = time.perf_counter()
-                result = index.knn_search(to_cpp_vector(qv), int(args.k), int(args.ef))
+                result_ids = run_query(database, qv, int(args.k), int(args.ef))
                 tq1 = time.perf_counter()
 
-                if not result:
+                if result_ids.size == 0:
                     raise RuntimeError("reader got empty result")
 
                 latencies.append(tq1 - tq0)
@@ -215,7 +273,7 @@ def run(folder: Path):
 
                 label = alloc_insert_id()
                 ti0 = time.perf_counter()
-                index.insert(int(label), to_cpp_vector(insert_vec))
+                run_insert(database, int(label), insert_vec)
                 ti1 = time.perf_counter()
 
                 latencies.append(ti1 - ti0)
@@ -243,18 +301,22 @@ def run(folder: Path):
 
     threads = []
     for reader_id in range(args.num_readers):
-        threads.append(threading.Thread(target=reader_worker, args=(reader_id,), name=f"reader-{reader_id}"))
+        threads.append(
+            threading.Thread(target=reader_worker, args=(reader_id,), name=f"reader-{reader_id}")
+        )
     for writer_id in range(args.num_writers):
-        threads.append(threading.Thread(target=writer_worker, args=(writer_id,), name=f"writer-{writer_id}"))
+        threads.append(
+            threading.Thread(target=writer_worker, args=(writer_id,), name=f"writer-{writer_id}")
+        )
 
-    for t in threads:
-        t.start()
+    for thread in threads:
+        thread.start()
 
     t_concurrent0 = time.perf_counter()
     start_event.set()
 
-    for t in threads:
-        t.join()
+    for thread in threads:
+        thread.join()
     t_concurrent1 = time.perf_counter()
 
     def safe_mean(values: list[float]) -> float:
@@ -270,44 +332,47 @@ def run(folder: Path):
     total_elapsed_s = t_concurrent1 - t_concurrent0
 
     log_lines = []
-    log_lines.append("=== Concurrent HNSW Performance Test ===")
-    log_lines.append(f"base_path:           {args.base}")
-    log_lines.append(f"query_path:          {args.query}")
-    log_lines.append(f"output:              {out_path}")
-    log_lines.append(f"csv:                 {csv_path}")
+    log_lines.append("=== Concurrent Index Performance Test ===")
+    log_lines.append(f"database_type:        {type(database).__name__}")
+    log_lines.append(f"base_path:            {args.base}")
+    log_lines.append(f"query_path:           {args.query}")
+    log_lines.append(f"output:               {out_path}")
+    log_lines.append(f"csv:                  {csv_path}")
     log_lines.append("")
-    log_lines.append(f"initial_N:           {N}")
-    log_lines.append(f"Q (ops per worker):  {Q}")
-    log_lines.append(f"D:                   {D}")
-    log_lines.append(f"k:                   {args.k}")
-    log_lines.append(f"num_readers:         {args.num_readers}")
-    log_lines.append(f"num_writers:         {args.num_writers}")
-    log_lines.append(f"insert_query_idx:    {args.insert_query_idx}")
-    log_lines.append(f"same_query_for_all:  {args.same_query_for_all_readers}")
+    log_lines.append(f"initial_N:            {N}")
+    log_lines.append(f"Q (ops per worker):   {Q}")
+    log_lines.append(f"planned_total_inserts:{total_future_inserts}")
+    log_lines.append(f"D:                    {D}")
+    log_lines.append(f"k:                    {args.k}")
+    log_lines.append(f"num_readers:          {args.num_readers}")
+    log_lines.append(f"num_writers:          {args.num_writers}")
+    log_lines.append(f"insert_query_idx:     {args.insert_query_idx}")
+    log_lines.append(f"same_query_for_all:   {args.same_query_for_all_readers}")
     log_lines.append("")
     log_lines.append("=== Build ===")
-    log_lines.append(f"space:               {args.space}")
-    log_lines.append(f"M:                   {args.M}")
-    log_lines.append(f"ef_construction:     {args.ef_construction}")
-    log_lines.append(f"ef:                  {args.ef}")
-    log_lines.append(f"random_seed:         {args.random_seed}")
-    log_lines.append(f"build_seconds:       {build_secs:.6f}")
+    log_lines.append(f"space:                {args.space}")
+    log_lines.append(f"M:                    {args.M}")
+    log_lines.append(f"ef_construction:      {args.ef_construction}")
+    log_lines.append(f"ef:                   {args.ef}")
+    log_lines.append(f"num_threads:          {args.num_threads}")
+    log_lines.append(f"random_seed:          {args.random_seed}")
+    log_lines.append(f"build_seconds:        {build_secs:.6f}")
     log_lines.append("")
     log_lines.append("=== Concurrent phase ===")
-    log_lines.append(f"elapsed_seconds:     {total_elapsed_s:.6f}")
-    log_lines.append(f"reader_ops_done:     {reader_completed}")
-    log_lines.append(f"writer_ops_done:     {writer_completed}")
-    log_lines.append(f"expected_reader_ops: {args.num_readers * Q}")
-    log_lines.append(f"expected_writer_ops: {args.num_writers * Q}")
-    log_lines.append(f"exceptions:          {len(exceptions)}")
+    log_lines.append(f"elapsed_seconds:      {total_elapsed_s:.6f}")
+    log_lines.append(f"reader_ops_done:      {reader_completed}")
+    log_lines.append(f"writer_ops_done:      {writer_completed}")
+    log_lines.append(f"expected_reader_ops:  {args.num_readers * Q}")
+    log_lines.append(f"expected_writer_ops:  {args.num_writers * Q}")
+    log_lines.append(f"exceptions:           {len(exceptions)}")
     log_lines.append("")
     log_lines.append("=== Reader summary ===")
-    log_lines.append(f"avg_wall_seconds:    {safe_mean(reader_wall_values):.6f}")
-    log_lines.append(f"max_wall_seconds:    {safe_max(reader_wall_values):.6f}")
+    log_lines.append(f"avg_wall_seconds:     {safe_mean(reader_wall_values):.6f}")
+    log_lines.append(f"max_wall_seconds:     {safe_max(reader_wall_values):.6f}")
     log_lines.append("")
     log_lines.append("=== Writer summary ===")
-    log_lines.append(f"avg_wall_seconds:    {safe_mean(writer_wall_values):.6f}")
-    log_lines.append(f"max_wall_seconds:    {safe_max(writer_wall_values):.6f}")
+    log_lines.append(f"avg_wall_seconds:     {safe_mean(writer_wall_values):.6f}")
+    log_lines.append(f"max_wall_seconds:     {safe_max(writer_wall_values):.6f}")
 
     if exceptions:
         log_lines.append("")
@@ -330,7 +395,7 @@ def run(folder: Path):
     out_path.write_text("\n".join(log_lines), encoding="utf-8")
     csv_path.write_text("\n".join(csv_rows) + "\n", encoding="utf-8")
 
-    print(f"HNSW build: {build_secs:.3f}s")
+    print(f"Build: {build_secs:.3f}s")
     print(f"Concurrent phase: {total_elapsed_s:.3f}s")
     print(f"Readers completed: {reader_completed}/{args.num_readers * Q}")
     print(f"Writers completed: {writer_completed}/{args.num_writers * Q}")
@@ -339,10 +404,7 @@ def run(folder: Path):
     print(f"Wrote CSV to: {csv_path}")
 
 
-def main():
-    folder = Path(__file__).resolve().parent
-    run(folder)
-
-
 if __name__ == "__main__":
-    main()
+    raise SystemExit(
+        "Import this harness and call run(folder=..., database=...). See the example in the chat response."
+    )

@@ -109,4 +109,27 @@ Exceptions: 0
 
 Using no-ops to mimic no concurrency control:
 ```
+double free or corruption (!prev)
+Aborted (core dumped)
+```
+
+Using hnswlib
+```
+Concurrent phase: 0.406s
+Readers completed: 2427/1000000
+Writers completed: 239/1000000
+Exceptions: 8
+```
+
+Logging the number of time we wait for a lock and time spent waiting for a lock:
+```
+Build: 263.644s
+Concurrent phase: 1010.192s
+Readers completed: 1000000/1000000
+Writers completed: 1000000/1000000
+Exceptions: 0
+
+=== Node lock wait stats ===
+Lock waits: 882596
+Total wait time: 678.014921 seconds
 ```
