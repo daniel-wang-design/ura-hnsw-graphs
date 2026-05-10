@@ -133,3 +133,9 @@ Exceptions: 0
 Lock waits: 882596
 Total wait time: 678.014921 seconds
 ```
+
+Sanity test to ensure that we are actually inserting vectors:
+```
+ura-hnsw-graphs/hnsw$ PYTHONPATH=./hnsw:. python test.py
+Test passed: inserted vector was found by query.
+```
